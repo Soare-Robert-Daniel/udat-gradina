@@ -12,13 +12,14 @@
 
 import { render } from "preact";
 import { useState, useEffect, useCallback } from "preact/hooks";
+import { twMerge } from "tailwind-merge";
 
 import "./style.css";
 
 const LABELS = {
   appTitle: "🌱 Grădină",
   appSubtitle: "Temporizator pentru udat",
-  setTimerFor: "Setează temporizatorul pentru",
+  setTimerFor: "Alege timp pentru",
   cancel: "Anulează",
   lastWatered: "Udat ultima dată:",
   timeRemaining: "Timp rămas:",
@@ -31,9 +32,20 @@ const LABELS = {
   solar3: "Solar Mare",
   solar4: "Solar Mic",
   solar5: "Solar Lung",
+  history: "Istoric udări",
+  duration: "Durată:",
+  backToOverview: "Înapoi la privire generală",
 };
 
 const GREENHOUSE_NUMS: number = 5;
+
+interface LogEntry {
+  id: string;
+  greenhouseId: string;
+  date: Date;
+  duration: number; // in minutes
+  status: "completed" | "canceled";
+}
 
 interface Greenhouse {
   label: string;
@@ -44,9 +56,15 @@ interface Greenhouse {
 
 interface AppState {
   greenhouses: Record<string, Greenhouse>;
+  activeTimer: string | null;
+}
+
+interface LogsState {
+  entries: LogEntry[];
 }
 
 const defaultState: AppState = {
+  activeTimer: null,
   greenhouses: Array(GREENHOUSE_NUMS)
     .fill({})
     .map((data, idx) => {
@@ -63,7 +81,57 @@ const defaultState: AppState = {
     }, {}),
 };
 
+const defaultLogsState: LogsState = {
+  entries: [
+    // Test data for first greenhouse
+    {
+      id: "log1",
+      greenhouseId: "solar0",
+      date: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      duration: 15,
+      status: "completed",
+    },
+    {
+      id: "log2",
+      greenhouseId: "solar0",
+      date: new Date(Date.now() - 6 * 60 * 60 * 1000),
+      duration: 8,
+      status: "canceled",
+    },
+    {
+      id: "log3",
+      greenhouseId: "solar0",
+      date: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      duration: 10,
+      status: "completed",
+    },
+  ],
+};
+
 const TIMER_OPTIONS = [5, 10, 15, 20, 25, 30]; // minutes
+
+// Log management functions
+function addLogEntry(logs: LogsState, entry: Omit<LogEntry, "id">): LogsState {
+  const id = `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const newEntry: LogEntry = { ...entry, id };
+
+  console.log(`Adding log entry for ${entry.greenhouseId}:`, newEntry);
+
+  return {
+    entries: [newEntry, ...logs.entries].slice(0, 1000), // Keep max 1000 entries
+  };
+}
+
+function getGreenhouseLogs(logs: LogsState, greenhouseId: string): LogEntry[] {
+  return logs.entries
+    .filter((entry) => entry.greenhouseId === greenhouseId)
+    .sort((a, b) => b.date.getTime() - a.date.getTime());
+}
+
+function getLatestRun(logs: LogsState, greenhouseId: string): Date | null {
+  const greenhouseLogs = getGreenhouseLogs(logs, greenhouseId);
+  return greenhouseLogs.length > 0 ? greenhouseLogs[0].date : null;
+}
 
 function formatTimeRemaining(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -77,6 +145,144 @@ function formatLastRun(date: Date | null): string {
     dateStyle: "long",
     timeStyle: "short",
   }).format(date);
+}
+
+interface HistoryItemProps {
+  entry: LogEntry;
+}
+
+function Button({
+  className = "",
+  onClick,
+  children,
+  variant = "primary",
+  compact = false,
+}) {
+  const variants = {
+    primary: "bg-yellow-400 text-black",
+    cancel: "bg-gray-500 text-white",
+    success: "bg-green-500 text-white",
+    danger: "bg-red-500 text-white",
+    back: "bg-blue-500 text-white",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={twMerge(
+        `inline-block
+		w-full
+		font-bold 
+		leading-none        
+		text-center align-middle
+		select-none
+		appearance-none outline-none
+		no-underline
+		border-[1.6px] border-black
+		shadow-[2px_2px_2px_rgba(187,187,187,1)]
+		transition-colors
+		hover:opacity-90`,
+        compact ? "text-lg py-2 px-3 mb-1" : "text-2xl py-3 px-4 mb-2",
+        variants[variant],
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function HistoryItem({ entry }: HistoryItemProps) {
+  const isCanceled = entry.status === "canceled";
+
+  return (
+    <div className="p-2 odd:bg-gray-200">
+      <div className="text-xl flex justify-between items-center">
+        <div className=" text-gray-800">{formatLastRun(entry.date)}</div>
+        <div
+          className={` font-medium ${
+            isCanceled ? "text-orange-600" : "text-green-600"
+          }`}
+        >
+          {entry.duration} {LABELS.minutesShort}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface HistorySectionProps {
+  logs: LogEntry[];
+}
+
+function HistorySection({ logs }: HistorySectionProps) {
+  // Take first 15 entries (already sorted)
+  const displayedHistory = logs.slice(0, 15);
+
+  if (displayedHistory.length === 0) {
+    return null;
+  }
+
+  return (
+    <div>
+      <h2 className="text-lg font-bold text-gray-800 mb-3">{LABELS.history}</h2>
+      <div className="">
+        {displayedHistory.map((entry) => (
+          <HistoryItem key={entry.id} entry={entry} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface TimerViewProps {
+  greenhouse: Greenhouse;
+  logs: LogEntry[];
+  onCancel: () => void;
+}
+
+function TimerView({ greenhouse, logs, onCancel }: TimerViewProps) {
+  const isRunning =
+    greenhouse.currentTime !== null && greenhouse.currentTime > 0;
+  const isCompleted = greenhouse.currentTime === 0;
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-3">
+      <div className="max-w-md mx-auto">
+        {/* Header */}
+        <div className="text-center mb-6">
+          <h1 className="text-5xl font-bold text-gray-800 mb-2">
+            {greenhouse.label}
+          </h1>
+        </div>
+
+        {/* Timer Display */}
+        <div className="mb-6 text-center">
+          {isRunning && (
+            <>
+              <div className="text-8xl font-mono text-red-600 font-bold mb-4">
+                {formatTimeRemaining(greenhouse.currentTime!)}
+              </div>
+            </>
+          )}
+
+          {isCompleted && (
+            <div className="text-green-600 font-bold text-xl mb-4">
+              {LABELS.wateringCompleted}
+            </div>
+          )}
+        </div>
+
+        {/* Cancel/Back Button */}
+        <Button onClick={onCancel} variant={isCompleted ? "back" : "primary"}>
+          {isCompleted ? `🡰 ${LABELS.backToOverview}` : `✖ ${LABELS.cancel}`}
+        </Button>
+
+        {/* History */}
+        <HistorySection logs={logs} />
+      </div>
+    </div>
+  );
 }
 
 interface TimerModalProps {
@@ -102,21 +308,19 @@ function TimerModal({
         </h2>
         <div className="grid grid-cols-2 gap-2 mb-3">
           {TIMER_OPTIONS.map((minutes) => (
-            <button
+            <Button
               key={minutes}
               onClick={() => onSelectTimer(minutes)}
-              className="bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-3 rounded-lg transition-colors text-sm"
+              variant="success"
+              compact
             >
-              {minutes} {LABELS.minutesShort}
-            </button>
+              ⏱ {minutes} {LABELS.minutesShort}
+            </Button>
           ))}
         </div>
-        <button
-          onClick={onClose}
-          className="w-full bg-gray-500 hover:bg-gray-600 text-white font-medium py-2 px-3 rounded-lg transition-colors text-sm"
-        >
-          {LABELS.cancel}
-        </button>
+        <Button onClick={onClose} variant="cancel" compact>
+          ✖ {LABELS.cancel}
+        </Button>
       </div>
     </div>
   );
@@ -125,62 +329,39 @@ function TimerModal({
 interface GreenhouseCardProps {
   id: string;
   greenhouse: Greenhouse;
+  lastRun: Date | null;
   onClick: () => void;
 }
 
-function GreenhouseCard({ id, greenhouse, onClick }: GreenhouseCardProps) {
+function GreenhouseCard({
+  id,
+  greenhouse,
+  lastRun,
+  onClick,
+}: GreenhouseCardProps) {
   const isRunning =
     greenhouse.currentTime !== null && greenhouse.currentTime > 0;
   const isCompleted = greenhouse.currentTime === 0;
 
   return (
-    <div
-      onClick={onClick}
-      className={`bg-white rounded-lg shadow-md p-1 cursor-pointer transition-all hover:shadow-lg ${
-        isRunning
-          ? "ring-2 ring-blue-400"
-          : isCompleted
-          ? "ring-2 ring-green-400"
-          : ""
-      }`}
-    >
+    <div className="not-last:border-b-4 not-last:pb-1">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-lg font-bold text-gray-800">{greenhouse.label}</h2>
-        <div
-          className={`w-2.5 h-2.5 rounded-full ${
-            isRunning
-              ? "bg-blue-500"
-              : isCompleted
-              ? "bg-green-500"
-              : "bg-gray-300"
-          }`}
-        />
+        <h2 className="text-4xl font-bold text-gray-800">{greenhouse.label}</h2>
+        <Button onClick={onClick} compact className="w-auto">
+          ➜
+        </Button>
       </div>
 
       <div className="space-y-1.5">
-        {isRunning && (
-          <div className="text-xs text-gray-600">
-            <span className="font-medium">{LABELS.timeRemaining}</span>
-            <div className="text-2xl font-mono text-red-600 font-bold">
-              {formatTimeRemaining(greenhouse.currentTime!)}
-            </div>
-          </div>
-        )}
-        <div className="text-xs text-gray-600">
+        <div className="text-lg text-gray-600">
           <span className="font-medium">{LABELS.lastWatered}</span>
-          <div className="text-gray-800 text-sm">
-            {formatLastRun(greenhouse.lastRun)}
-          </div>
+          <div className="text-gray-800 text-2xl">{formatLastRun(lastRun)}</div>
         </div>
 
         {isCompleted && (
-          <div className="text-green-600 font-medium text-sm">
+          <div className="text-green-600 font-medium text-2xl">
             {LABELS.wateringCompleted}
           </div>
-        )}
-
-        {!isRunning && !isCompleted && (
-          <div className="text-gray-500 text-xs">{LABELS.tapToStart}</div>
         )}
       </div>
     </div>
@@ -189,7 +370,7 @@ function GreenhouseCard({ id, greenhouse, onClick }: GreenhouseCardProps) {
 
 export function App() {
   const [state, setState] = useState<AppState>(() => {
-    const saved = localStorage.getItem("greenhouse-app-state-v1");
+    const saved = localStorage.getItem("greenhouse-app-state-v2");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -206,12 +387,33 @@ export function App() {
             );
           }
         });
+        if (!parsed.activeTimer) {
+          parsed.activeTimer = null;
+        }
         return parsed;
       } catch {
         return defaultState;
       }
     }
     return defaultState;
+  });
+
+  const [logs, setLogs] = useState<LogsState>(() => {
+    const saved = localStorage.getItem("greenhouse-logs-v1");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Convert date strings back to Date objects
+        parsed.entries = parsed.entries.map((entry: any) => ({
+          ...entry,
+          date: new Date(entry.date),
+        }));
+        return parsed;
+      } catch {
+        return defaultLogsState;
+      }
+    }
+    return defaultLogsState;
   });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -221,8 +423,13 @@ export function App() {
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem("greenhouse-app-state", JSON.stringify(state));
+    localStorage.setItem("greenhouse-app-state-v2", JSON.stringify(state));
   }, [state]);
+
+  // Save logs to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem("greenhouse-logs-v1", JSON.stringify(logs));
+  }, [logs]);
 
   // Timer update effect
   useEffect(() => {
@@ -234,11 +441,30 @@ export function App() {
         Object.keys(newState.greenhouses).forEach((key) => {
           const greenhouse = newState.greenhouses[key];
           if (greenhouse.currentTime !== null && greenhouse.currentTime > 0) {
+            const newTime = greenhouse.currentTime - 1;
             newState.greenhouses[key] = {
               ...greenhouse,
-              currentTime: greenhouse.currentTime - 1,
+              currentTime: newTime,
             };
             hasChanges = true;
+
+            // If timer just completed, add to logs
+            if (newTime === 0 && greenhouse.targetTime && greenhouse.lastRun) {
+              const duration = Math.round(
+                (greenhouse.targetTime.getTime() -
+                  greenhouse.lastRun.getTime()) /
+                  (1000 * 60)
+              );
+
+              setLogs((prevLogs) =>
+                addLogEntry(prevLogs, {
+                  greenhouseId: key,
+                  date: greenhouse.lastRun!,
+                  duration,
+                  status: "completed",
+                })
+              );
+            }
           }
         });
 
@@ -253,10 +479,11 @@ export function App() {
     (id: string) => {
       const greenhouse = state.greenhouses[id];
 
-      // If timer is completed, reset it
+      // If timer is completed, reset it and go back to overview
       if (greenhouse.currentTime === 0) {
         setState((prevState) => ({
           ...prevState,
+          activeTimer: null,
           greenhouses: {
             ...prevState.greenhouses,
             [id]: {
@@ -269,7 +496,7 @@ export function App() {
         return;
       }
 
-      // If timer is running, do nothing (or you could pause/stop it)
+      // If timer is running, do nothing (user is already in timer view)
       if (greenhouse.currentTime !== null && greenhouse.currentTime > 0) {
         return;
       }
@@ -290,6 +517,7 @@ export function App() {
 
       setState((prevState) => ({
         ...prevState,
+        activeTimer: selectedGreenhouse,
         greenhouses: {
           ...prevState.greenhouses,
           [selectedGreenhouse]: {
@@ -312,37 +540,94 @@ export function App() {
     setSelectedGreenhouse(null);
   }, []);
 
+  const handleTimerCancel = useCallback(() => {
+    if (!state.activeTimer) return;
+
+    const greenhouse = state.greenhouses[state.activeTimer];
+
+    setState((prevState) => {
+      const newState = { ...prevState };
+
+      // If there was a running timer, add it to logs as a canceled run
+      if (
+        greenhouse.currentTime !== null &&
+        greenhouse.currentTime > 0 &&
+        greenhouse.lastRun &&
+        greenhouse.targetTime
+      ) {
+        const totalDuration = Math.round(
+          (greenhouse.targetTime.getTime() - greenhouse.lastRun.getTime()) /
+            (1000 * 60)
+        );
+        const actualDuration =
+          totalDuration - Math.round(greenhouse.currentTime / 60);
+
+        setLogs((prevLogs) =>
+          addLogEntry(prevLogs, {
+            greenhouseId: state.activeTimer!,
+            date: greenhouse.lastRun!,
+            duration: actualDuration,
+            status: "canceled",
+          })
+        );
+      }
+
+      // Reset greenhouse state
+      newState.greenhouses[state.activeTimer] = {
+        ...newState.greenhouses[state.activeTimer],
+        currentTime: null,
+        targetTime: null,
+      };
+
+      newState.activeTimer = null;
+      return newState;
+    });
+  }, [state.activeTimer, state.greenhouses]);
+
   return (
-    <div className="min-h-screen bg-gray-100 p-3">
-      <div className="max-w-md mx-auto">
-        <div className="text-center mb-3">
-          <h1 className="font-bold text-gray-800 mb-1 text-xs">
-            {LABELS.appTitle}
-          </h1>
-          <p className="text-gray-600 text-xs">{LABELS.appSubtitle}</p>
-        </div>
+    <>
+      {state.activeTimer ? (
+        <TimerView
+          greenhouse={state.greenhouses[state.activeTimer]}
+          logs={getGreenhouseLogs(logs, state.activeTimer)}
+          onCancel={handleTimerCancel}
+        />
+      ) : (
+        <div className="min-h-screen bg-gray-100 p-3">
+          <div className="max-w-md mx-auto">
+            <div className="text-center mb-3 flex flex-row gap-1">
+              <h1 className="font-bold text-gray-800 mb-1 text-xs">
+                {LABELS.appTitle}
+              </h1>
+              <p className="text-gray-600 text-xs">➜ {LABELS.appSubtitle}</p>
+            </div>
 
-        <div className="space-y-3">
-          {Object.entries(state.greenhouses).map(([id, greenhouse]) => (
-            <GreenhouseCard
-              key={id}
-              id={id}
-              greenhouse={greenhouse}
-              onClick={() => handleGreenhouseClick(id)}
-            />
-          ))}
-        </div>
-      </div>
+            <div className="space-y-3">
+              {Object.entries(state.greenhouses).map(([id, greenhouse]) => (
+                <GreenhouseCard
+                  key={id}
+                  id={id}
+                  greenhouse={greenhouse}
+                  lastRun={getLatestRun(logs, id)}
+                  onClick={() => handleGreenhouseClick(id)}
+                />
+              ))}
+            </div>
+          </div>
 
-      <TimerModal
-        isOpen={modalOpen}
-        onClose={handleModalClose}
-        onSelectTimer={handleTimerSelect}
-        greenhouseName={
-          selectedGreenhouse ? state.greenhouses[selectedGreenhouse].label : ""
-        }
-      />
-    </div>
+          <TimerModal
+            isOpen={modalOpen}
+            onClose={handleModalClose}
+            onSelectTimer={handleTimerSelect}
+            greenhouseName={
+              selectedGreenhouse
+                ? state.greenhouses[selectedGreenhouse].label
+                : ""
+            }
+          />
+        </div>
+      )}
+    </>
   );
 }
 
