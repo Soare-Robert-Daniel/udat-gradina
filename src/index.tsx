@@ -19,7 +19,7 @@ import "./style.css";
 const LABELS = {
   appTitle: "🌱 Grădină",
   appSubtitle: "Temporizator pentru udat",
-  setTimerFor: "Alege timp pentru",
+  setTimerFor: "Alege minutele pentru",
   cancel: "Anulează",
   lastWatered: "Udat ultima dată:",
   timeRemaining: "Timp rămas:",
@@ -313,12 +313,13 @@ function TimerModal({
               onClick={() => onSelectTimer(minutes)}
               variant="success"
               compact
+              className="text-5xl"
             >
-              ⏱ {minutes} {LABELS.minutesShort}
+              ⏱ {minutes}
             </Button>
           ))}
         </div>
-        <Button onClick={onClose} variant="cancel" compact>
+        <Button onClick={onClose} variant="danger" compact>
           ✖ {LABELS.cancel}
         </Button>
       </div>
